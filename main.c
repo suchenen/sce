@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include "log.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,7 +32,17 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define KEY_PORT        GPIOB
+#define KEY_PIN         GPIO_PIN_12
+#define KEY_ACTIVE      0
+#define DEBOUNCE_MS     20
+#define LED_PORT        GPIOA
+#define LED_PIN         GPIO_PIN_1
+#define LED_ON          GPIO_PIN_SET
+#define LED_OFF         GPIO_PIN_RESET
 
+#define SLOW_MS         500
+#define FAST_MS         100
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -43,7 +54,12 @@
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-
+static uint8_t  key_raw_last  = 1;
+static uint8_t  key_stable    = 1;
+static uint32_t key_edge_tick = 0;
+static uint8_t  mode      = 1;
+static uint8_t  led_state = 1;
+static uint32_t led_tick  = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -69,7 +85,6 @@ int _write(int file, char *ptr, int len)
         __io_putchar((unsigned char)ptr[i]);
     return len;
 }
-
 /* USER CODE END 0 */
 
 /**
@@ -103,25 +118,77 @@ int main(void)
   MX_GPIO_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  printf("KEY TEST start (no debounce)\r\n");
-   uint8_t last_level = (uint8_t)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
-   uint32_t count = 0;
+  LOG_I("system ready, HCLK=%lu Hz", (unsigned long)HAL_RCC_GetHCLKFreq());
+  printf("KEY + LED MODE TEST\r\n");
+  printf("mode1\r\n");
+
+  key_edge_tick = HAL_GetTick();
+  led_tick      = HAL_GetTick();
+  HAL_GPIO_WritePin(LED_PORT, LED_PIN, LED_ON);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
-  {uint8_t level = (uint8_t)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
-
-  if (last_level == 1 && level == 0)   /* 抓到一次 高→低，就是"按下"这个沿 */
   {
-      count++;                          /* 不加任何延时、不加消抖 */
-      printf("%lu\r\n", count);
-  }
-  last_level = level;
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    uint32_t now = HAL_GetTick();
+    uint8_t  raw = (uint8_t)HAL_GPIO_ReadPin(KEY_PORT, KEY_PIN);
+
+
+    if (raw != key_raw_last)
+    {
+
+        key_raw_last  = raw;
+        key_edge_tick = now;
+    }
+    else if ((now - key_edge_tick) >= DEBOUNCE_MS && raw != key_stable)
+    {
+
+        key_stable = raw;
+
+        if (key_stable == KEY_ACTIVE)
+        {
+            mode++;
+            if (mode > 3) mode = 1;
+            printf("mode%d\r\n", mode);
+
+            led_state = 1;
+            led_tick  = now;
+        }
+    }
+
+
+    switch (mode)
+    {
+      case 1:
+        HAL_GPIO_WritePin(LED_PORT, LED_PIN, LED_ON);
+        break;
+
+      case 2:
+        if ((now - led_tick) >= SLOW_MS)
+        {
+            led_tick  = now;
+            led_state = !led_state;
+        }
+        HAL_GPIO_WritePin(LED_PORT, LED_PIN, led_state ? LED_ON : LED_OFF);
+        break;
+
+      case 3:
+        if ((now - led_tick) >= FAST_MS)
+        {
+            led_tick  = now;
+            led_state = !led_state;
+        }
+        HAL_GPIO_WritePin(LED_PORT, LED_PIN, led_state ? LED_ON : LED_OFF);
+        break;
+
+      default:
+        mode = 1;
+        break;
+    }
   }
   /* USER CODE END 3 */
 }
@@ -216,20 +283,20 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin : PA1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  /*Configure GPIO pin : LED_Pin */
+  GPIO_InitStruct.Pin = LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(LED_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB12 */
-  GPIO_InitStruct.Pin = GPIO_PIN_12;
+  /*Configure GPIO pin : KEY_Pin */
+  GPIO_InitStruct.Pin = KEY_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(KEY_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
